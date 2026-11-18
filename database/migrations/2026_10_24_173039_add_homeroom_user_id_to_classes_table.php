@@ -9,29 +9,42 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('classes', function (Blueprint $table) {
-            $table->foreignId('homeroom_user_id')
-                ->nullable()
-                ->after('homeroom_teacher_id')
-                ->constrained('users')
-                ->nullOnDelete();
-        });
+        if (!Schema::hasColumn('classes', 'homeroom_user_id')) {
+            Schema::table('classes', function (Blueprint $table) {
+                $table->foreignId('homeroom_user_id')
+                    ->nullable()
+                    ->constrained('users')
+                    ->nullOnDelete();
+            });
+        }
 
-        // Isi otomatis untuk kelas yang sudah ada: akun admin_walas
-        // dengan nomor HP yang sama dengan wali kelas di tabel teachers.
-        DB::statement(
-            "UPDATE classes c
-             JOIN teachers t ON t.id = c.homeroom_teacher_id
-             JOIN users u ON u.phone_number = t.phone AND u.role = 'admin_walas'
-             SET c.homeroom_user_id = u.id
-             WHERE c.homeroom_user_id IS NULL"
-        );
+        // Ambil pasangan kelas dan user wali kelas
+        $homerooms = DB::table('classes as c')
+            ->join('teachers as t', 't.id', '=', 'c.homeroom_teacher_id')
+            ->join('users as u', function ($join) {
+                $join->on('u.phone_number', '=', 't.phone')
+                    ->where('u.role', '=', 'admin_walas');
+            })
+            ->whereNull('c.homeroom_user_id')
+            ->select('c.id as class_id', 'u.id as user_id')
+            ->get();
+
+        // Perbarui homeroom_user_id setiap kelas
+        foreach ($homerooms as $homeroom) {
+            DB::table('classes')
+                ->where('id', $homeroom->class_id)
+                ->update([
+                    'homeroom_user_id' => $homeroom->user_id,
+                ]);
+        }
     }
 
     public function down(): void
     {
-        Schema::table('classes', function (Blueprint $table) {
-            $table->dropConstrainedForeignId('homeroom_user_id');
-        });
+        if (Schema::hasColumn('classes', 'homeroom_user_id')) {
+            Schema::table('classes', function (Blueprint $table) {
+                $table->dropConstrainedForeignId('homeroom_user_id');
+            });
+        }
     }
 };
